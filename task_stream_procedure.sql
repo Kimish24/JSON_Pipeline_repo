@@ -1,0 +1,265 @@
+CREATE OR REPLACE STREAM
+JSON_PROJECT.BRONZE.STR_BRONZE_JSON
+
+ON TABLE JSON_PROJECT.BRONZE.BRONZE_JSON
+
+APPEND_ONLY = TRUE;
+
+SHOW STREAMS IN SCHEMA JSON_PROJECT.BRONZE;
+-----------------------
+
+CREATE OR REPLACE STREAM
+JSON_PROJECT.SILVER.STR_SILVER_JSON
+
+ON TABLE JSON_PROJECT.SILVER.SILVER_JSON
+
+APPEND_ONLY = TRUE;
+
+SHOW STREAMS IN SCHEMA JSON_PROJECT.SILVER;
+
+-------------
+--stage to bronze
+
+CREATE OR REPLACE PROCEDURE
+JSON_PROJECT.JSON_PROJECT.SP_STAGE_TO_BRONZE()
+
+RETURNS VARCHAR
+
+LANGUAGE SQL
+
+EXECUTE AS OWNER
+
+AS
+
+$$
+
+BEGIN
+
+    COPY INTO JSON_PROJECT.BRONZE.BRONZE_JSON
+    (
+        PAYLOAD,
+        FILE_NAME,
+        FILE_ROW_NUMBER,
+        LOAD_TIMESTAMP
+    )
+
+    FROM
+    (
+        SELECT
+
+            t.$1,
+
+            METADATA$FILENAME,
+
+            METADATA$FILE_ROW_NUMBER,
+
+            METADATA$START_SCAN_TIME
+
+        FROM @JSON_PROJECT.JSON_PROJECT.STG_JSON_RAW
+        (
+            FILE_FORMAT => JSON_PROJECT.JSON_PROJECT.FF_JSON
+        ) t
+    )
+
+    ON_ERROR = 'ABORT_STATEMENT';
+
+
+    RETURN 'Stage to Bronze load completed successfully';
+
+END;
+
+$$;
+
+--bronze to silver
+
+CREATE OR REPLACE PROCEDURE
+JSON_PROJECT.JSON_PROJECT.SP_BRONZE_TO_SILVER()   
+
+RETURNS VARCHAR
+
+LANGUAGE SQL
+
+EXECUTE AS OWNER
+
+AS
+
+$$
+
+BEGIN
+
+    INSERT INTO JSON_PROJECT.SILVER.SILVER_JSON
+    (
+        RECORD_ID,
+        CONTINENT,
+        COUNTRY_STATE,
+        URL,
+        COOK_TIME,
+        CUISINE,
+        DESCRIPTION,
+
+        INGREDIENTS,
+        INGREDIENTS_0,
+        INGREDIENTS_1,
+        INGREDIENTS_2,
+        INGREDIENTS_3,
+        INGREDIENTS_4,
+        INGREDIENTS_5,
+
+        INSTRUCTIONS,
+        INSTRUCTIONS_0,
+        INSTRUCTIONS_1,
+
+        NUTRIENTS,
+
+        CALORIES,
+        CARBOHYDRATECONTENT,
+        CHOLESTEROLCONTENT,
+        FATCONTENT,
+        FIBERCONTENT,
+        PROTEINCONTENT,
+        SATURATEDFATCONTENT,
+        SODIUMCONTENT,
+        SUGARCONTENT,
+        UNSATURATEDFATCONTENT,
+
+        PREP_TIME,
+        RATING,
+        SERVES,
+        TITLE,
+        TOTAL_TIME
+    )
+
+    SELECT
+
+        f.KEY AS RECORD_ID,
+
+        f.VALUE:"Contient"::STRING AS CONTINENT,
+
+        f.VALUE:"Country_State"::STRING AS COUNTRY_STATE,
+
+        f.VALUE:"URL"::STRING AS URL,
+
+        f.VALUE:"cook_time"::STRING AS COOK_TIME,
+
+        f.VALUE:"cuisine"::STRING AS CUISINE,
+
+        f.VALUE:"description"::STRING AS DESCRIPTION,
+
+        f.VALUE:"ingredients"::VARIANT AS INGREDIENTS,
+
+        f.VALUE:"ingredients"[0]::VARIANT AS INGREDIENTS_0,
+
+        f.VALUE:"ingredients"[1]::VARIANT AS INGREDIENTS_1,
+
+        f.VALUE:"ingredients"[2]::VARIANT AS INGREDIENTS_2,
+
+        f.VALUE:"ingredients"[3]::VARIANT AS INGREDIENTS_3,
+
+        f.VALUE:"ingredients"[4]::VARIANT AS INGREDIENTS_4,
+
+        f.VALUE:"ingredients"[5]::VARIANT AS INGREDIENTS_5,
+
+        f.VALUE:"instructions"::VARIANT AS INSTRUCTIONS,
+
+        f.VALUE:"instructions"[0]::VARIANT AS INSTRUCTIONS_0,
+
+        f.VALUE:"instructions"[1]::VARIANT AS INSTRUCTIONS_1,
+
+        f.VALUE:"nutrients"::VARIANT AS NUTRIENTS,
+
+        f.VALUE:"nutrients":"calories"::STRING
+            AS CALORIES,
+
+        f.VALUE:"nutrients":"carbohydrateContent"::STRING
+            AS CARBOHYDRATECONTENT,
+
+        f.VALUE:"nutrients":"cholesterolContent"::STRING
+            AS CHOLESTEROLCONTENT,
+
+        f.VALUE:"nutrients":"fatContent"::STRING
+            AS FATCONTENT,
+
+        f.VALUE:"nutrients":"fiberContent"::STRING
+            AS FIBERCONTENT,
+
+        f.VALUE:"nutrients":"proteinContent"::STRING
+            AS PROTEINCONTENT,
+
+        f.VALUE:"nutrients":"saturatedFatContent"::STRING
+            AS SATURATEDFATCONTENT,
+
+        f.VALUE:"nutrients":"sodiumContent"::STRING
+            AS SODIUMCONTENT,
+
+        f.VALUE:"nutrients":"sugarContent"::STRING
+            AS SUGARCONTENT,
+
+        f.VALUE:"nutrients":"unsaturatedFatContent"::STRING
+            AS UNSATURATEDFATCONTENT,
+
+        f.VALUE:"prep_time"::STRING AS PREP_TIME,
+
+        f.VALUE:"rating"::STRING AS RATING,
+
+        f.VALUE:"serves"::VARCHAR AS SERVES,
+
+        f.VALUE:"title"::STRING AS TITLE,
+
+        f.VALUE:"total_time"::STRING AS TOTAL_TIME
+
+    FROM JSON_PROJECT.BRONZE.STR_BRONZE_JSON b,
+
+    LATERAL FLATTEN
+    (
+        INPUT => b.PAYLOAD
+    ) f;
+
+
+    RETURN 'Bronze to Silver transformation completed successfully';
+
+END;
+
+$$;
+------------------
+
+--Task 1
+
+CREATE OR REPLACE TASK
+JSON_PROJECT.JSON_PROJECT.TASK_STAGE_TO_BRONZE
+
+WAREHOUSE = COMPUTE_WH
+
+SCHEDULE = '5 MINUTES'
+
+AS
+
+CALL JSON_PROJECT.JSON_PROJECT.SP_STAGE_TO_BRONZE();
+
+--Task 2
+
+CREATE OR REPLACE TASK
+JSON_PROJECT.JSON_PROJECT.TASK_BRONZE_TO_SILVER
+WAREHOUSE = COMPUTE_WH
+SCHEDULE = '5 MINUTES'
+AS
+CALL JSON_PROJECT.JSON_PROJECT.SP_BRONZE_TO_SILVER();
+
+
+-----------
+ALTER TASK
+JSON_PROJECT.JSON_PROJECT.TASK_BRONZE_TO_SILVER
+RESUME;
+
+ALTER TASK
+JSON_PROJECT.JSON_PROJECT.TASK_STAGE_TO_BRONZE
+RESUME;
+
+SHOW TASKS IN SCHEMA JSON_PROJECT.JSON_PROJECT;
+
+EXECUTE TASK
+JSON_PROJECT.JSON_PROJECT.TASK_STAGE_TO_BRONZE;
+
+select * from json_project.silver.silver_json;
+
+
+ 
